@@ -1,8 +1,8 @@
 name: 'llm-cost-diff'
-description: >
-  Fail the build when your estimated monthly LLM API bill drifts beyond a
-  threshold, using the open dataset from apipriceindex.com. Like a lockfile,
-  but for LLM prices.
+# Marketplace : description limitée à 125 caractères.
+description: >-
+  Fail CI when your estimated monthly LLM API bill drifts beyond a threshold.
+  Prices from apipriceindex.com (CC BY 4.0).
 branding:
   icon: 'dollar-sign'
   color: 'orange'
