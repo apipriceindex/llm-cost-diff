@@ -1,0 +1,40 @@
+name: 'llm-cost-diff'
+description: >
+  Fail the build when your estimated monthly LLM API bill drifts beyond a
+  threshold, using the open dataset from apipriceindex.com. Like a lockfile,
+  but for LLM prices.
+branding:
+  icon: 'dollar-sign'
+  color: 'orange'
+
+inputs:
+  config:
+    description: 'Path to llm-costs.json'
+    default: 'llm-costs.json'
+  lock:
+    description: 'Path to llm-costs.lock.json'
+    default: 'llm-costs.lock.json'
+  index-url:
+    description: 'Dataset URL (override for testing)'
+    default: 'https://apipriceindex.com/api/all.json'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check LLM cost drift
+      shell: bash
+      env:
+        LLM_COST_CONFIG: ${{ inputs.config }}
+        LLM_COST_LOCK: ${{ inputs.lock }}
+        LLM_COST_INDEX_URL: ${{ inputs.index-url }}
+      run: |
+        set -o pipefail
+        python3 "${{ github.action_path }}/cost_diff.py" check | tee /tmp/llm-cost-diff.out
+        status=$?
+        {
+          echo '### llm-cost-diff'
+          echo '```'
+          cat /tmp/llm-cost-diff.out
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+        exit $status

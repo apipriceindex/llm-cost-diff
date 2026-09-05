@@ -1,0 +1,7 @@
+{
+  "threshold_pct": 10,
+  "workloads": [
+    { "model": "openai:gpt-5.6-luna", "input_mtok": 200, "output_mtok": 15, "cache_pct": 60 },
+    { "model": "anthropic:sonnet-5", "input_mtok": 50, "output_mtok": 10 }
+  ]
+}
