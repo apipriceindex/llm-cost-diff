@@ -28,9 +28,10 @@ runs:
         LLM_COST_LOCK: ${{ inputs.lock }}
         LLM_COST_INDEX_URL: ${{ inputs.index-url }}
       run: |
-        set -o pipefail
-        python3 "${{ github.action_path }}/cost_diff.py" check | tee /tmp/llm-cost-diff.out
-        status=$?
+        # `|| status=$?` : le shell GitHub tourne avec -e, sans ça une dérive
+        # détectée (exit 1) couperait l'étape AVANT l'écriture du résumé.
+        status=0
+        python3 "${{ github.action_path }}/cost_diff.py" check 2>&1 | tee /tmp/llm-cost-diff.out || status=$?
         {
           echo '### llm-cost-diff'
           echo '```'
