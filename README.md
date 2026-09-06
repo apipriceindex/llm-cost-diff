@@ -60,6 +60,34 @@ python3 cost_diff.py check
 - Cache discount is only applied where the provider publishes a
   cached-input price; no assumed discount otherwise.
 
+## Cheaper alternatives on drift
+
+When the check fails, it also lists cheaper options for each workload,
+straight from the index — never as noise while the bill is within threshold:
+
+- **Same model, different host**: the same `base_model` served cheaper by
+  another provider. No caveat needed — it is the same weights.
+- **Comparable specs**: same category, capabilities are a superset, context
+  window is at least as large, and ≥10% cheaper. These lines are explicitly
+  labeled *cost only — quality is not compared*: the index ranks prices,
+  never model quality. Validate before switching.
+
+### PR comment
+
+Pass `github-token` and the drift (with alternatives) is posted as a single
+PR comment, updated in place on subsequent runs:
+
+```yaml
+permissions:
+  pull-requests: write
+steps:
+  - uses: apipriceindex/llm-cost-diff@v0
+    with:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+Without the token, behavior is unchanged (job summary + exit code only).
+
 ## Config reference
 
 | Field | Meaning |

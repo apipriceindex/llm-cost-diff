@@ -78,6 +78,45 @@ def monthly_cost(w: dict, model: dict) -> float:
     return vin * (1 - c) * inp + vin * c * (cached if cached is not None else inp) + vout * out
 
 
+def _cost_or_none(w: dict, model: dict) -> float | None:
+    try:
+        return monthly_cost(w, model)
+    except SystemExit:
+        return None
+
+
+def suggest_alternatives(w: dict, model: dict, models: list[dict], top: int = 3) -> list[str]:
+    """Alternatives moins chères pour le MÊME workload, deux paliers :
+      A — même base_model chez un autre hôte : même chose, moins cher, point.
+      B — specs comparables (capabilities ⊇, context_window ≥, même catégorie),
+          au moins 10 % moins cher. Coût seulement : l'index ne compare PAS
+          la qualité, et chaque ligne B le rappelle.
+    """
+    cur = _cost_or_none(w, model)
+    if cur is None or cur <= 0:
+        return []
+    caps = set(model.get("capabilities") or [])
+    ctx = model.get("context_window") or 0
+    tier_a, tier_b = [], []
+    for m in models:
+        if m["id"] == model["id"]:
+            continue
+        cost = _cost_or_none(w, m)
+        if cost is None or cost >= cur:
+            continue
+        saving = (cur - cost) / cur * 100
+        if m.get("base_model") == model.get("base_model"):
+            tier_a.append((cost, m["id"], saving, "même modèle, autre hôte"))
+        elif (caps and set(m.get("capabilities") or []) >= caps
+              and m.get("category") == model.get("category")
+              and (m.get("context_window") or 0) >= ctx
+              and saving >= 10):
+            tier_b.append((cost, m["id"], saving,
+                           "specs comparables — qualité non comparée, à valider"))
+    return [f"    → {mid:<36} ${cost:,.2f}/mois (−{saving:.0f}%, {note})"
+            for cost, mid, saving, note in sorted(tier_a)[:top] + sorted(tier_b)[:top]]
+
+
 def compute() -> dict | None:
     if not CONFIG.exists():
         raise SystemExit(f"✗ config introuvable : {CONFIG}")
@@ -97,9 +136,11 @@ def compute() -> dict | None:
         total += cost
         lines.append({"model": w["model"], "monthly_usd": cost,
                       "price_verified_at": (m.get("pricing") or {}).get("verified_at")})
+    # Clés préfixées "_" : contexte d'exécution, jamais écrites dans le lock.
     return {"index_as_of": index.get("as_of"), "total_monthly_usd": round(total, 2),
             "threshold_pct": float(cfg.get("threshold_pct", DEFAULT_THRESHOLD_PCT)),
-            "workloads": lines}
+            "workloads": lines,
+            "_index_models": index.get("models", []), "_config": cfg}
 
 
 def main(argv: list[str]) -> int:
@@ -118,7 +159,8 @@ def main(argv: list[str]) -> int:
         print(f"  {l['model']:<38} ${l['monthly_usd']}")
 
     if cmd == "update":
-        LOCK.write_text(json.dumps(cur, indent=2) + "\n")
+        lock_doc = {k: v for k, v in cur.items() if not k.startswith("_")}
+        LOCK.write_text(json.dumps(lock_doc, indent=2) + "\n")
         print(f"✓ lock écrit : {LOCK}")
         return 0
 
@@ -134,6 +176,19 @@ def main(argv: list[str]) -> int:
     if abs(delta_pct) > cur["threshold_pct"]:
         print(f"✗ dérive de coût au-delà du seuil — vérifie le repricing puis "
               f"`cost_diff.py update` pour accepter.")
+        # Alternatives moins chères depuis l'index, par workload, seulement en
+        # cas de dérive : pas de bruit tant que la facture tient.
+        by_id = {m["id"]: m for m in cur["_index_models"]}
+        printed_header = False
+        for w in cur["_config"].get("workloads", []):
+            sug = suggest_alternatives(w, by_id[w["model"]], cur["_index_models"])
+            if not sug:
+                continue
+            if not printed_header:
+                print("\nAlternatives moins chères (source : index, coût seul) :")
+                printed_header = True
+            print(f"  {w['model']} :")
+            print("\n".join(sug))
         return 1
     print("✓ dans le seuil.")
     return 0

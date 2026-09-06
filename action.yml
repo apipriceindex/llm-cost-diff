@@ -17,6 +17,12 @@ inputs:
   index-url:
     description: 'Dataset URL (override for testing)'
     default: 'https://apipriceindex.com/api/all.json'
+  github-token:
+    description: >-
+      Optional. If set and the event is a pull request, a detected drift posts
+      (or updates) one PR comment with the diff and cheaper alternatives.
+      Pass secrets.GITHUB_TOKEN; the job needs `pull-requests: write`.
+    default: ''
 
 runs:
   using: 'composite'
@@ -27,9 +33,12 @@ runs:
         LLM_COST_CONFIG: ${{ inputs.config }}
         LLM_COST_LOCK: ${{ inputs.lock }}
         LLM_COST_INDEX_URL: ${{ inputs.index-url }}
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        REPO: ${{ github.repository }}
       run: |
         # `|| status=$?` : le shell GitHub tourne avec -e, sans ça une dérive
-        # détectée (exit 1) couperait l'étape AVANT l'écriture du résumé.
+        # détectée (exit 1) couperait l'étape AVANT résumé et commentaire.
         status=0
         python3 "${{ github.action_path }}/cost_diff.py" check 2>&1 | tee /tmp/llm-cost-diff.out || status=$?
         {
@@ -38,4 +47,38 @@ runs:
           cat /tmp/llm-cost-diff.out
           echo '```'
         } >> "$GITHUB_STEP_SUMMARY"
+
+        # Commentaire PR : uniquement en cas de dérive, token fourni, event PR.
+        # Un seul commentaire par PR (marqueur HTML) : mis à jour, jamais empilé.
+        if [[ $status -ne 0 && -n "$GH_TOKEN" && -n "$PR_NUMBER" ]]; then
+          MARKER='<!-- llm-cost-diff -->'
+          {
+            echo "$MARKER"
+            echo '### 💸 llm-cost-diff — dérive de coût détectée'
+            echo '```'
+            cat /tmp/llm-cost-diff.out
+            echo '```'
+            echo '_Prix : [API Price Index](https://apipriceindex.com/use-this-data/) (CC BY 4.0). Les alternatives sont classées par coût seul — la qualité n'"'"'est pas comparée._'
+          } > /tmp/llm-cost-diff.comment
+          python3 - <<'EOF' || echo "⚠ commentaire PR impossible (droits ? pull-requests: write)" >&2
+        import json, os, urllib.request
+        tok, repo, pr = os.environ["GH_TOKEN"], os.environ["REPO"], os.environ["PR_NUMBER"]
+        body = open("/tmp/llm-cost-diff.comment").read()
+        hdr = {"Authorization": f"Bearer {tok}", "Accept": "application/vnd.github+json",
+               "User-Agent": "llm-cost-diff"}
+        def call(url, data=None, method=None):
+            req = urllib.request.Request(url, headers=hdr, method=method,
+                data=json.dumps(data).encode() if data else None)
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.loads(r.read() or "{}")
+        base = f"https://api.github.com/repos/{repo}"
+        existing = [c for c in call(f"{base}/issues/{pr}/comments?per_page=100")
+                    if "<!-- llm-cost-diff -->" in (c.get("body") or "")]
+        if existing:
+            call(f"{base}/issues/comments/{existing[0]['id']}", {"body": body}, "PATCH")
+        else:
+            call(f"{base}/issues/{pr}/comments", {"body": body}, "POST")
+        print("✓ commentaire PR posté/mis à jour.")
+        EOF
+        fi
         exit $status
