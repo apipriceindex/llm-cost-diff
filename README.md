@@ -7,7 +7,8 @@ blocking diff instead of a surprise on the invoice.
 
 Prices come from the open dataset at
 [apipriceindex.com](https://apipriceindex.com/use-this-data/) (CC BY 4.0,
-cross-checked against official pricing pages).
+read daily from each provider's own price list or from OpenRouter's
+per-provider data, each price with its source).
 
 ## Quick start
 
